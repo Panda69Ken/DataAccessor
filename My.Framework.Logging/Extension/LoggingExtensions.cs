@@ -1,6 +1,5 @@
 ﻿using Exceptionless.NLog;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using NLog;
 using NLog.Config;
@@ -172,7 +171,7 @@ namespace My.Framework.Logging.Extension
                         IncludeAllProperties = true,   // 可选，用于自动包含结构化日志属性
                         Attributes =
                         {
-                            new JsonAttribute("index",  config.ElasticIndex + "-${date:format=yyyy.MM.dd}",),
+                            new JsonAttribute("index",  config.ElasticIndex + "-${date:format=yyyy.MM.dd}"),
                             new JsonAttribute("message", "${message}"),
                             new JsonAttribute("exception", "${exception:format=tostring}"),
                             new JsonAttribute("tags", "${event-properties:item=Tags}"),
