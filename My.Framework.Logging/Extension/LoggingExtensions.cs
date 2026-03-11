@@ -1,9 +1,11 @@
 ﻿using Exceptionless.NLog;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using NLog;
 using NLog.Config;
 using NLog.Extensions.Logging;
+using NLog.Layouts;
 using NLog.Targets;
 using NLog.Targets.ElasticSearch;
 using NLog.Targets.Wrappers;
@@ -85,7 +87,7 @@ namespace My.Framework.Logging.Extension
                 factory.Configuration.AddTarget(new AsyncTargetWrapper("exceptionless", new ExceptionlessTarget()
                 {
                     Name = "exceptionless",
-                    ApiKey = config.ApiKey,
+                    ApiKey = config.ExceptionlessKey,
                     ServerUrl = config.ServerUrl,
                     Fields =
                     {
@@ -112,23 +114,23 @@ namespace My.Framework.Logging.Extension
             {
                 //My.ProjectName.Rpc: host=my-projectName-rpc-6db45f8b-dhqbc, version=1.0.0
                 var host = Dns.GetHostName();
-                if (string.IsNullOrEmpty(config.ELKProject))
+                if (string.IsNullOrEmpty(config.ElasticProject))
                 {
                     var m = Regex.Replace(host, @"(.+[rpc|svc|api])-.+", "$1", RegexOptions.IgnoreCase);
-                    config.ELKProject = m;
+                    config.ElasticProject = m;
                 }
 
                 var target = new ElasticSearchTarget
                 {
                     Name = "elastic",
-                    Uri = config.ELKUrl,
-                    Index = config.ELKIndex + "-${date:format=yyyy.MM.dd}",
+                    Uri = config.ServerUrl,
+                    Index = config.ElasticIndex + "-${date:format=yyyy.MM.dd}",
                     Layout = "${message} ${exception:format=tostring}",
                     Fields = {
                         new Field { Name = "tags", Layout = "${event-properties:item=Tags}" },
                         new Field { Name = "namespace", Layout = "${logger}" }, 
                         //new Field{ Name = "memberid", Layout = "${event-properties:item=MemberId}" },
-                        new Field { Name = "projectname", Layout = config.ELKProject },
+                        new Field { Name = "projectname", Layout = config.ElasticProject },
                         new Field { Name = "host", Layout = host },
                         new Field { Name = "createTime", Layout = "${longdate}" },
                         //new Field{ Name="processId", Layout="${processid}"},
@@ -144,12 +146,52 @@ namespace My.Framework.Logging.Extension
                 if (config.RequireAuth)
                 {
                     target.RequireAuth = config.RequireAuth;
-                    target.Username = config.Username;
+                    target.Username = config.Account;
                     target.Password = config.Password;
                 }
 
                 factory.Configuration.AddTarget(new AsyncTargetWrapper("elastic", target));
             }
+
+            if (factory.Configuration.AllTargets.FirstOrDefault(m => m.Name.ToLower() == "logstash") == null)
+            {
+                var host = Dns.GetHostName();
+                if (string.IsNullOrEmpty(config.ElasticProject))
+                {
+                    var m = Regex.Replace(host, @"(.+[rpc|svc|api])-.+", "$1", RegexOptions.IgnoreCase);
+                    config.ElasticProject = m;
+                }
+
+                var target = new NetworkTarget
+                {
+                    Name = "logstash",
+                    Address = config.ServerUrl,
+                    KeepConnection = true,
+                    Layout = new JsonLayout
+                    {
+                        IncludeAllProperties = true,   // 可选，用于自动包含结构化日志属性
+                        Attributes =
+                        {
+                            new JsonAttribute("index",  config.ElasticIndex + "-${date:format=yyyy.MM.dd}",),
+                            new JsonAttribute("message", "${message}"),
+                            new JsonAttribute("exception", "${exception:format=tostring}"),
+                            new JsonAttribute("tags", "${event-properties:item=Tags}"),
+                            new JsonAttribute("namespace", "${logger}"),
+                            new JsonAttribute("projectname", config.ElasticProject),
+                            new JsonAttribute("host", host),
+                            new JsonAttribute("createTime", "${longdate}"),
+                            new JsonAttribute("stacktrace", "${stacktrace}"),
+                            new JsonAttribute("number", "${counter:increment=1:sequence=Layout:value=1}"),
+                            new JsonAttribute("aspnetRequestIp", "${aspnet-request-ip}"),
+                            new JsonAttribute("aspnetRequestHeader", "${aspnet-request-headers:HeaderNames=request-uuid,request-url,request-time,request-operator}"),
+                        }
+                    }
+                };
+
+                factory.Configuration.AddTarget(new AsyncTargetWrapper("logstash", target));
+                factory.Configuration.AddRuleForAllLevels("logstash");
+            }
+
 
             if (config.Rules != null && config.Rules.Any())
             {
